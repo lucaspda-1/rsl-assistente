@@ -18,6 +18,18 @@
 <button id="mostrar-formulario" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-4">
     + Adicionar artigo
 </button>
+<button id="mostrar-importacao" type="button" class="bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 px-4 rounded mb-4 ml-2">
+    Importar Parsifal / CSV
+</button>
+<div id="painel-importacao" class="hidden bg-white p-6 rounded-lg shadow mb-6">
+    <h3 class="text-lg font-semibold mb-4">Importar artigos</h3>
+    <p class="text-gray-600 mb-4">Selecione um arquivo BibTeX exportado do Parsifal ou um arquivo CSV.</p>
+    <form id="form-importacao" class="flex flex-col md:flex-row gap-4 items-start md:items-center">
+        <input id="arquivo-artigos" name="arquivo" type="file" accept=".bib,.bibtex,.csv" required class="border rounded p-2">
+        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Importar arquivo</button>
+    </form>
+    <p id="mensagem-importacao" class="hidden mt-3 rounded p-3"></p>
+</div>
 <div id="painel-artigo" class="hidden bg-white p-6 rounded-lg shadow mb-6">
     <span id="adicionar-artigo"></span>
     <h3 class="text-lg font-semibold mb-4">Adicionar artigo</h3>
@@ -66,6 +78,29 @@
     document.getElementById("mostrar-formulario").addEventListener("click", () => {
         const painel = document.getElementById("painel-artigo");
         painel.classList.toggle("hidden");
+    });
+
+    document.getElementById("mostrar-importacao").addEventListener("click", () => {
+        document.getElementById("painel-importacao").classList.toggle("hidden");
+    });
+
+    document.getElementById("form-importacao").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const arquivo = document.getElementById("arquivo-artigos").files[0];
+        const mensagem = document.getElementById("mensagem-importacao");
+        const dados = new FormData();
+        dados.append("arquivo", arquivo);
+        const resposta = await fetch("/api/artigos/importar/{{ projeto.id }}", {method: "POST", body: dados});
+        const resultado = await resposta.json();
+        mensagem.classList.remove("hidden");
+        if (resposta.ok) {
+            mensagem.textContent = `${resultado.total_importado} artigo(s) importado(s) com sucesso.`;
+            mensagem.className = "mt-3 rounded p-3 bg-green-100 text-green-800";
+            setTimeout(() => window.location.reload(), 700);
+        } else {
+            mensagem.textContent = resultado.detail || "Não foi possível importar o arquivo.";
+            mensagem.className = "mt-3 rounded p-3 bg-red-100 text-red-800";
+        }
     });
 
     if (window.location.hash === "#adicionar-artigo") {

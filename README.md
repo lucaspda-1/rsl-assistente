@@ -79,6 +79,8 @@ Os artigos usam estados explícitos: `IMPORTADO`, `DUPLICADO`, `EXCLUIDO_TRIAGEM
 - `GET /exportacao/prisma/{projeto_id}`: consultar métricas PRISMA.
 - `GET /exportacao/excel/{projeto_id}`: baixar o relatório Excel.
 
+Na página **Artigos**, use o botão **Importar Parsifal / CSV** para selecionar um arquivo exportado do Parsifal. Arquivos `.bib` ou `.bibtex` importam todos os registros BibTeX; arquivos `.csv` aceitam colunas como `Title`, `Authors`, `Year`, `Abstract`, `DOI` e `URL`.
+
 ## Ollama (opcional)
 
 Instale o Ollama, inicie o serviço e baixe o modelo desejado:

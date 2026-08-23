@@ -1199,6 +1199,75 @@ ARQUIVO ATUALIZADO: app/templates/artigos.html
 </script>
 
 ======================================================================
+ATUALIZAÇÃO FINAL: IMPORTAÇÃO PELO FRONTEND
+======================================================================
+
+O arquivo app/templates/artigos.html agora possui o botão
+"Importar Parsifal / CSV". Ele abre um seletor de arquivos e envia o
+arquivo escolhido para POST /api/artigos/importar/{projeto_id}.
+
+Trecho principal da implementação:
+
+<button id="mostrar-importacao" type="button">
+    Importar Parsifal / CSV
+</button>
+<div id="painel-importacao" class="hidden">
+    <h3>Importar artigos</h3>
+    <p>Selecione um arquivo BibTeX exportado do Parsifal ou um arquivo CSV.</p>
+    <form id="form-importacao">
+        <input id="arquivo-artigos" name="arquivo" type="file" accept=".bib,.bibtex,.csv" required>
+        <button type="submit">Importar arquivo</button>
+    </form>
+    <p id="mensagem-importacao" class="hidden"></p>
+</div>
+
+<script>
+    document.getElementById("mostrar-importacao").addEventListener("click", () => {
+        document.getElementById("painel-importacao").classList.toggle("hidden");
+    });
+
+    document.getElementById("form-importacao").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const arquivo = document.getElementById("arquivo-artigos").files[0];
+        const dados = new FormData();
+        dados.append("arquivo", arquivo);
+        const resposta = await fetch("/api/artigos/importar/{{ projeto.id }}", {
+            method: "POST",
+            body: dados
+        });
+        const resultado = await resposta.json();
+        const mensagem = document.getElementById("mensagem-importacao");
+        mensagem.classList.remove("hidden");
+        if (resposta.ok) {
+            mensagem.textContent = `${resultado.total_importado} artigo(s) importado(s) com sucesso.`;
+            setTimeout(() => window.location.reload(), 700);
+        } else {
+            mensagem.textContent = resultado.detail || "Não foi possível importar o arquivo.";
+        }
+    });
+</script>
+
+======================================================================
+COMO USAR A IMPORTAÇÃO
+======================================================================
+
+1. Inicie o projeto com:
+   python -m uvicorn app.main:app --reload
+
+2. Acesse:
+   http://127.0.0.1:8000/artigos
+
+3. Se ainda não houver projeto, crie um projeto no formulário exibido.
+
+4. Clique em "Importar Parsifal / CSV".
+
+5. Selecione o arquivo .bib ou .bibtex exportado do Parsifal.
+   Todos os artigos contidos no arquivo serão importados.
+
+Também são aceitos arquivos .csv com colunas Title, Authors, Year,
+Abstract, DOI e URL.
+
+======================================================================
 ARQUIVO: app/templates/artigos.html
 ======================================================================
 {% extends "base.html" %}
