@@ -1,0 +1,1298 @@
+RSL ASSISTANT - CÓDIGO COMPLETO DO PROJETO
+
+Este documento contém o código-fonte atual do projeto.
+Arquivos binários, banco de dados e cache Python foram excluídos.
+
+======================================================================
+ARQUIVO: app/database/database.py
+======================================================================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Cria o arquivo rsl_assistant.db no diretório raiz do projeto
+SQLALCHEMY_DATABASE_URL = "sqlite:///./rsl_assistant.db"
+
+# connect_args={"check_same_thread": False} é necessário para o SQLite no FastAPI
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+
+# Dependency para injetar a sessão do banco nas rotas do FastAPI
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+======================================================================
+ARQUIVO: app/database/models.py
+======================================================================
+from datetime import datetime
+from enum import Enum as PyEnum
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
+from .database import Base
+
+
+# Status possível do artigo no fluxo PRISMA
+class StatusArtigo(str, PyEnum):
+    IMPORTADO = "IMPORTADO"
+    DUPLICADO = "DUPLICADO"
+    TRIAGEM = "TRIAGEM"
+    EXCLUIDO = "EXCLUIDO"
+    LEITURA_COMPLETA = "LEITURA_COMPLETA"
+    INCLUIDO = "INCLUIDO"
+
+
+class TipoCriterio(str, PyEnum):
+    INCLUSAO = "INCLUSAO"
+    EXCLUSAO = "EXCLUSAO"
+
+
+class DecisaoTriagem(str, PyEnum):
+    INCLUIR = "INCLUIR"
+    EXCLUIR = "EXCLUIR"
+    DUVIDA = "DUVIDA"
+
+
+class Projeto(Base):
+    __tablename__ = "projetos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String(150), nullable=False)
+    descricao = Column(Text, nullable=True)
+    data_criacao = Column(DateTime, default=datetime.utcnow)
+
+    # Relacionamentos
+    protocolo = relationship("Protocolo", back_populates="projeto", uselist=False, cascade="all, delete-orphan")
+    questoes = relationship("QuestaoPesquisa", back_populates="projeto", cascade="all, delete-orphan")
+    criterios = relationship("Criterio", back_populates="projeto", cascade="all, delete-orphan")
+    artigos = relationship("Artigo", back_populates="projeto", cascade="all, delete-orphan")
+
+
+class Protocolo(Base):
+    __tablename__ = "protocolos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id"), nullable=False, unique=True)
+    objetivo = Column(Text, nullable=True)
+    populacao = Column(Text, nullable=True)
+    intervencao = Column(Text, nullable=True)
+    comparacao = Column(Text, nullable=True)
+    outcome = Column(Text, nullable=True)
+
+    projeto = relationship("Projeto", back_populates="protocolo")
+
+
+class QuestaoPesquisa(Base):
+    __tablename__ = "questoes_pesquisa"
+
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id"), nullable=False)
+    codigo = Column(String(10), nullable=False)  # Ex: RQ1
+    pergunta = Column(Text, nullable=False)
+
+    projeto = relationship("Projeto", back_populates="questoes")
+    extracoes = relationship("Extracao", back_populates="questao", cascade="all, delete-orphan")
+
+
+class Criterio(Base):
+    __tablename__ = "criterios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id"), nullable=False)
+    tipo = Column(Enum(TipoCriterio), nullable=False)
+    codigo = Column(String(10), nullable=False)  # Ex: CI01, CE01
+    descricao = Column(Text, nullable=False)
+
+    projeto = relationship("Projeto", back_populates="criterios")
+
+
+class Artigo(Base):
+    __tablename__ = "artigos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id"), nullable=False)
+    titulo = Column(String(500), nullable=False)
+    autores = Column(Text, nullable=True)
+    ano = Column(Integer, nullable=True)
+    resumo = Column(Text, nullable=True)
+    palavras_chave = Column(Text, nullable=True)
+    doi = Column(String(100), nullable=True)
+    url = Column(String(500), nullable=True)
+    fonte = Column(String(100), nullable=True)  # Ex: IEEE, ACM, Scopus
+    arquivo_pdf = Column(String(255), nullable=True)
+    status = Column(Enum(StatusArtigo), default=StatusArtigo.IMPORTADO, nullable=False)
+    data_importacao = Column(DateTime, default=datetime.utcnow)
+
+    projeto = relationship("Projeto", back_populates="artigos")
+    triagens = relationship("Triagem", back_populates="artigo", cascade="all, delete-orphan")
+    extracoes = relationship("Extracao", back_populates="artigo", cascade="all, delete-orphan")
+
+
+class Triagem(Base):
+    __tablename__ = "triagens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    artigo_id = Column(Integer, ForeignKey("artigos.id"), nullable=False)
+    decisao = Column(Enum(DecisaoTriagem), nullable=False)
+    motivo_exclusao = Column(Text, nullable=True)
+    avaliacao_ia = Column(Text, nullable=True)
+    confianca_ia = Column(Integer, nullable=True)  # 0 a 100%
+    revisor = Column(String(100), default="Humano")
+    data_avaliacao = Column(DateTime, default=datetime.utcnow)
+
+    artigo = relationship("Artigo", back_populates="triagens")
+
+
+class Extracao(Base):
+    __tablename__ = "extracoes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    artigo_id = Column(Integer, ForeignKey("artigos.id"), nullable=False)
+    rq_id = Column(Integer, ForeignKey("questoes_pesquisa.id"), nullable=False)
+    resposta = Column(Text, nullable=False)
+    evidencia = Column(Text, nullable=True)
+    revisor = Column(String(100), default="Humano")
+    data = Column(DateTime, default=datetime.utcnow)
+
+    artigo = relationship("Artigo", back_populates="extracoes")
+    questao = relationship("QuestaoPesquisa", back_populates="extracoes")
+
+class Busca(Base):
+    __tablename__ = "buscas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    projeto_id = Column(Integer, ForeignKey("projetos.id"), nullable=False)
+    fonte = Column(String(100), nullable=False)  # Ex: IEEE Xplore, Scopus, ACM
+    string_busca = Column(Text, nullable=False)
+    data_busca = Column(DateTime, default=datetime.utcnow)
+    total_encontrados = Column(Integer, default=0)
+
+    projeto = relationship("Projeto", back_populates="buscas")
+
+
+# Adicione no modelo Projeto:
+# buscas = relationship("Busca", back_populates="projeto", cascade="all, delete-orphan")
+
+======================================================================
+ARQUIVO: app/main.py
+======================================================================
+from fastapi import FastAPI, Request, Depends
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+
+from app.database import models
+from app.database.database import engine, get_db
+from app.routes import projetos, protocolo, artigos, exportacao
+from app.services.prisma import calcular_fluxo_prisma
+from app.routes import artigos, exportacao, ia, projetos, protocolo
+
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Assistente RSL", version="0.1.0")
+
+templates = Jinja2Templates(directory="app/templates")
+
+app.include_router(projetos.router)
+app.include_router(protocolo.router)
+app.include_router(artigos.router)
+app.include_router(exportacao.router)
+app.include_router(ia.router)
+
+@app.get("/dashboard")
+def view_dashboard(request: Request, db: Session = Depends(get_db)):
+    prisma_data = calcular_fluxo_prisma(db, projeto_id=1)
+    return templates.TemplateResponse("dashboard.html", {"request": request, "prisma": prisma_data})
+
+@app.get("/triagem")
+def view_triagem(request: Request, db: Session = Depends(get_db)):
+    artigo_pendente = db.query(models.Artigo).filter(models.Artigo.status == models.StatusArtigo.IMPORTADO).first()
+    return templates.TemplateResponse("triagem.html", {"request": request, "artigo": artigo_pendente})
+
+======================================================================
+ARQUIVO: app/routes/projetos.py
+======================================================================
+from app.database import models
+from app.database.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/projetos", tags=["Projetos"])
+
+
+class ProjetoCreate(BaseModel):
+    nome: str
+    descricao: str | None = None
+
+
+@router.post("/")
+def criar_projeto(dados: ProjetoCreate, db: Session = Depends(get_db)):
+    novo_projeto = models.Projeto(nome=dados.nome, descricao=dados.descricao)
+    db.add(novo_projeto)
+    db.commit()
+    db.refresh(novo_projeto)
+    return novo_projeto
+
+
+@router.get("/")
+def listar_projetos(db: Session = Depends(get_db)):
+    return db.query(models.Projeto).all()
+
+
+@router.get("/{projeto_id}")
+def obter_projeto(projeto_id: int, db: Session = Depends(get_db)):
+    proj = (
+        db.query(models.Projeto)
+        .filter(models.Projeto.id == projeto_id)
+        .first()
+    )
+    if not proj:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    return proj
+
+======================================================================
+ARQUIVO: app/routes/protocolo.py
+======================================================================
+from app.database import models
+from app.database.database import get_db
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/protocolo", tags=["Protocolo"])
+
+
+class QuestaoCreate(BaseModel):
+    projeto_id: int
+    codigo: str  # Ex: RQ1
+    pergunta: str
+
+
+class CriterioCreate(BaseModel):
+    projeto_id: int
+    tipo: models.TipoCriterio  # INCLUSAO ou EXCLUSAO
+    codigo: str  # Ex: CI01, CE01
+    descricao: str
+
+
+@router.post("/questao")
+def adicionar_questao(dados: QuestaoCreate, db: Session = Depends(get_db)):
+    q = models.QuestaoPesquisa(**dados.model_dump())
+    db.add(q)
+    db.commit()
+    db.refresh(q)
+    return q
+
+
+@router.post("/criterio")
+def adicionar_criterio(dados: CriterioCreate, db: Session = Depends(get_db)):
+    c = models.Criterio(**dados.model_dump())
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+======================================================================
+ARQUIVO: app/routes/artigos.py
+======================================================================
+from app.database import models
+from app.database.database import get_db
+from app.services.deduplicacao import encontrar_duplicados
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/artigos", tags=["Artigos"])
+
+
+class TriagemCreate(BaseModel):
+    artigo_id: int
+    decisao: models.DecisaoTriagem
+    motivo_exclusao: str | None = None
+    revisor: str = "Humano"
+
+
+@router.get("/projeto/{projeto_id}")
+def listar_artigos_projeto(
+    projeto_id: int, status: str | None = None, db: Session = Depends(get_db)
+):
+    query = db.query(models.Artigo).filter(
+        models.Artigo.projeto_id == projeto_id
+    )
+    if status:
+        query = query.filter(models.Artigo.status == status)
+    return query.all()
+
+
+@router.post("/triagem")
+def registrar_triagem(dados: TriagemCreate, db: Session = Depends(get_db)):
+    artigo = (
+        db.query(models.Artigo)
+        .filter(models.Artigo.id == dados.artigo_id)
+        .first()
+    )
+    if not artigo:
+        raise HTTPException(status_code=404, detail="Artigo não encontrado")
+
+    nova_triagem = models.Triagem(**dados.model_dump())
+
+    if dados.decisao == models.DecisaoTriagem.INCLUIR:
+        artigo.status = models.StatusArtigo.LEITURA_COMPLETA
+    elif dados.decisao == models.DecisaoTriagem.EXCLUIR:
+        artigo.status = models.StatusArtigo.EXCLUIDO
+
+    db.add(nova_triagem)
+    db.commit()
+    return {"message": "Triagem registrada com sucesso", "status_artigo": artigo.status}
+
+
+@router.post("/deduplicar/{projeto_id}")
+def executar_deduplicacao(projeto_id: int, db: Session = Depends(get_db)):
+    artigos = (
+        db.query(models.Artigo)
+        .filter(models.Artigo.projeto_id == projeto_id)
+        .all()
+    )
+    duplicados_ids = encontrar_duplicados(artigos)
+
+    if duplicados_ids:
+        db.query(models.Artigo).filter(
+            models.Artigo.id.in_(duplicados_ids)
+        ).update(
+            {models.Artigo.status: models.StatusArtigo.DUPLICADO},
+            synchronize_session=False,
+        )
+        db.commit()
+
+    return {
+        "total_analisados": len(artigos),
+        "duplicados_encontrados": len(duplicados_ids),
+    }
+
+======================================================================
+ARQUIVO: app/routes/exportacao.py
+======================================================================
+import os
+from app.database.database import get_db
+from app.services.exportacao import exportar_projeto_excel
+from app.services.prisma import calcular_fluxo_prisma
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/exportacao", tags=["Exportação & PRISMA"])
+
+
+@router.get("/prisma/{projeto_id}")
+def obter_prisma(projeto_id: int, db: Session = Depends(get_db)):
+    return calcular_fluxo_prisma(db, projeto_id)
+
+
+@router.get("/excel/{projeto_id}")
+def baixar_excel(projeto_id: int, db: Session = Depends(get_db)):
+    caminho_dir = "data/exports"
+    os.makedirs(caminho_dir, exist_ok=True)
+    caminho_arquivo = os.path.join(
+        caminho_dir, f"RSL_Projeto_{projeto_id}.xlsx"
+    )
+
+    try:
+        exportar_projeto_excel(db, projeto_id, caminho_arquivo)
+        return FileResponse(
+            path=caminho_arquivo,
+            filename=f"RSL_Projeto_{projeto_id}.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao gerar Excel: {str(e)}"
+        )
+
+======================================================================
+ARQUIVO: app/routes/ia.py
+======================================================================
+from app.database import models
+from app.database.database import get_db
+from app.services.ollama_service import (
+    analisar_artigo_com_ollama,
+    extrair_texto_pdf,
+)
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/ia", tags=["Inteligência Artificial"])
+
+
+@router.post("/triagem/{artigo_id}")
+def executar_triagem_ia(artigo_id: int, db: Session = Depends(get_db)):
+    artigo = (
+        db.query(models.Artigo)
+        .filter(models.Artigo.id == artigo_id)
+        .first()
+    )
+    if not artigo:
+        raise HTTPException(status_code=404, detail="Artigo não encontrado")
+
+    criterios = (
+        db.query(models.Criterio)
+        .filter(models.Criterio.projeto_id == artigo.projeto_id)
+        .all()
+    )
+    c_inc = [
+        c.descricao
+        for c in criterios
+        if c.tipo == models.TipoCriterio.INCLUSAO
+    ]
+    c_exc = [
+        c.descricao
+        for c in criterios
+        if c.tipo == models.TipoCriterio.EXCLUSAO
+    ]
+
+    texto = artigo.resumo
+    if artigo.arquivo_pdf:
+        texto = extrair_texto_pdf(artigo.arquivo_pdf)
+
+    analise = analisar_artigo_com_ollama(texto, c_inc, c_exc)
+
+    triagem_ia = models.Triagem(
+        artigo_id=artigo.id,
+        decisao=models.DecisaoTriagem.DUVIDA,
+        avaliacao_ia=f"[{analise.get('recomendacao')}] {analise.get('justificativa')}",
+        confianca_ia=analise.get("confianca", 0),
+        revisor="Ollama (IA)",
+    )
+    db.add(triagem_ia)
+    db.commit()
+
+    return {"artigo_id": artigo_id, "resultado_ia": analise}
+
+======================================================================
+ARQUIVO: app/services/artigos.py
+======================================================================
+import csv
+import io
+import bibtexparser
+from sqlalchemy.orm import Session
+from app.database import models
+
+
+def importar_artigos_csv(db: Session, projeto_id: int, conteudo_bytes: bytes, fonte: str = "CSV Import"):
+    texto = conteudo_bytes.decode("utf-8", errors="ignore")
+    leitor = csv.DictReader(io.StringIO(texto))
+    
+    artigos_criados = 0
+    for linha in leitor:
+        titulo = linha.get("Title") or linha.get("title") or linha.get("Document Title") or "Sem título"
+        autores = linha.get("Authors") or linha.get("authors") or linha.get("Author") or ""
+        
+        ano_str = linha.get("Year") or linha.get("year") or linha.get("Publication Year") or ""
+        try:
+            ano = int(ano_str) if ano_str else None
+        except ValueError:
+            ano = None
+            
+        resumo = linha.get("Abstract") or linha.get("abstract") or ""
+        doi = linha.get("DOI") or linha.get("doi") or ""
+        url = linha.get("URL") or linha.get("url") or ""
+        
+        novo_artigo = models.Artigo(
+            projeto_id=projeto_id,
+            titulo=titulo,
+            autores=autores,
+            ano=ano,
+            resumo=resumo,
+            doi=doi,
+            url=url,
+            fonte=fonte,
+            status=models.StatusArtigo.IMPORTADO
+        )
+        db.add(novo_artigo)
+        artigos_criados += 1
+        
+    db.commit()
+    return artigos_criados
+
+
+def importar_artigos_bibtex(
+    db: Session,
+    projeto_id: int,
+    conteudo_bibtex: str,
+    fonte: str = "Parsifal BibTeX",
+):
+    bib_database = bibtexparser.loads(conteudo_bibtex)
+    artigos_criados = 0
+
+    for entry in bib_database.entries:
+        novo_artigo = models.Artigo(
+            projeto_id=projeto_id,
+            titulo=entry.get("title", "Sem título").strip("{}"),
+            autores=entry.get("author", "").strip("{}"),
+            ano=int(entry.get("year")) if entry.get("year") else None,
+            resumo=entry.get("abstract", "").strip("{}"),
+            doi=entry.get("doi", "").strip("{}"),
+            url=entry.get("url", "").strip("{}"),
+            fonte=fonte,
+            status=models.StatusArtigo.IMPORTADO,
+        )
+        db.add(novo_artigo)
+        artigos_criados += 1
+
+    db.commit()
+    return artigos_criados
+
+======================================================================
+ARQUIVO: app/services/deduplicacao.py
+======================================================================
+import re
+
+
+def normalizar_texto(texto: str) -> str:
+    if not texto:
+        return ""
+    texto = texto.lower()
+    return re.sub(r"[^\w\s]", "", texto).strip()
+
+
+def encontrar_duplicados(artigos: list) -> list:
+    duplicados_ids = []
+    vistos_doi = set()
+    vistos_titulos = set()
+
+    for artigo in artigos:
+        eh_duplicado = False
+
+        if artigo.doi:
+            doi_limpo = artigo.doi.strip().lower()
+            if doi_limpo in vistos_doi:
+                eh_duplicado = True
+            else:
+                vistos_doi.add(doi_limpo)
+
+        titulo_limpo = normalizar_texto(artigo.titulo)
+        if titulo_limpo:
+            if titulo_limpo in vistos_titulos:
+                eh_duplicado = True
+            else:
+                vistos_titulos.add(titulo_limpo)
+
+        if eh_duplicado:
+            duplicados_ids.append(artigo.id)
+
+    return duplicados_ids
+
+======================================================================
+ARQUIVO: app/services/prisma.py
+======================================================================
+from sqlalchemy.orm import Session
+from app.database import models
+
+
+def calcular_fluxo_prisma(db: Session, projeto_id: int) -> dict:
+    total_encontrados = (
+        db.query(models.Artigo)
+        .filter(models.Artigo.projeto_id == projeto_id)
+        .count()
+    )
+
+    duplicados = (
+        db.query(models.Artigo)
+        .filter(
+            models.Artigo.projeto_id == projeto_id,
+            models.Artigo.status == models.StatusArtigo.DUPLICADO,
+        )
+        .count()
+    )
+
+    apos_duplicados = total_encontrados - duplicados
+
+    excluidos_triagem = (
+        db.query(models.Artigo)
+        .filter(
+            models.Artigo.projeto_id == projeto_id,
+            models.Artigo.status == models.StatusArtigo.EXCLUIDO,
+        )
+        .count()
+    )
+
+    texto_completo = (
+        db.query(models.Artigo)
+        .filter(
+            models.Artigo.projeto_id == projeto_id,
+            models.Artigo.status.in_(
+                [
+                    models.StatusArtigo.LEITURA_COMPLETA,
+                    models.StatusArtigo.INCLUIDO,
+                ]
+            ),
+        )
+        .count()
+    )
+
+    incluidos = (
+        db.query(models.Artigo)
+        .filter(
+            models.Artigo.projeto_id == projeto_id,
+            models.Artigo.status == models.StatusArtigo.INCLUIDO,
+        )
+        .count()
+    )
+
+    excluidos_completo = texto_completo - incluidos
+
+    motivos_exclusao_query = (
+        db.query(
+            models.Triagem.motivo_exclusao,
+            models.sqlalchemy.func.count(models.Triagem.id),
+        )
+        .join(models.Artigo)
+        .filter(
+            models.Artigo.projeto_id == projeto_id,
+            models.Triagem.decisao == models.DecisaoTriagem.EXCLUIR,
+        )
+        .group_by(models.Triagem.motivo_exclusao)
+        .all()
+    )
+
+    motivos_exclusao = {
+        motivo or "Sem motivo especificado": qtd
+        for motivo, qtd in motivos_exclusao_query
+    }
+
+    return {
+        "total_encontrados": total_encontrados,
+        "duplicados": duplicados,
+        "apos_duplicados": apos_duplicados,
+        "triados_titulo_resumo": apos_duplicados,
+        "excluidos_triagem": excluidos_triagem,
+        "texto_completo_avaliado": texto_completo,
+        "excluidos_texto_completo": excluidos_completo,
+        "motivos_exclusao": motivos_exclusao,
+        "estudos_incluidos": incluidos,
+    }
+
+======================================================================
+ARQUIVO: app/services/exportacao.py
+======================================================================
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from sqlalchemy.orm import Session
+
+from app.database import models
+from app.services.prisma import calcular_fluxo_prisma
+
+
+def exportar_projeto_excel(db: Session, projeto_id: int, caminho_saida: str) -> str:
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    data_font = Font(name="Arial", size=10)
+    title_font = Font(name="Arial", size=14, bold=True, color="1F4E78")
+
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+
+    ws_prisma = wb.create_sheet(title="PRISMA 2020")
+    ws_prisma.append(["Fluxo de Seleção de Estudos - PRISMA 2020"])
+    ws_prisma.cell(row=1, column=1).font = title_font
+    ws_prisma.append([])
+
+    dados_prisma = calcular_fluxo_prisma(db, projeto_id)
+    ws_prisma.append(["Etapa do PRISMA", "Quantidade de Artigos"])
+    for cell in ws_prisma[3]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    linhas_prisma = [
+        ("Total de estudos identificados nas bases", dados_prisma["total_encontrados"]),
+        ("Estudos duplicados removidos", dados_prisma["duplicados"]),
+        ("Estudos triados (Título e Resumo)", dados_prisma["apos_duplicados"]),
+        ("Estudos excluídos na triagem", dados_prisma["excluidos_triagem"]),
+        ("Estudos recuperados para leitura completa", dados_prisma["texto_completo_avaliado"]),
+        ("Estudos excluídos na leitura completa", dados_prisma["excluidos_texto_completo"]),
+        ("ESTUDOS INCLUÍDOS NA REVISÃO FINAL", dados_prisma["estudos_incluidos"]),
+    ]
+
+    for label, qtd in linhas_prisma:
+        ws_prisma.append([label, qtd])
+
+    ws_artigos = wb.create_sheet(title="Artigos")
+    headers_artigos = ["ID", "Título", "Autores", "Ano", "Fonte", "DOI", "URL", "Status"]
+    ws_artigos.append(headers_artigos)
+    for cell in ws_artigos[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    artigos = db.query(models.Artigo).filter(models.Artigo.projeto_id == projeto_id).all()
+    for a in artigos:
+        ws_artigos.append([a.id, a.titulo, a.autores, a.ano, a.fonte, a.doi, a.url, a.status])
+
+    ws_triagem = wb.create_sheet(title="Triagem")
+    headers_triagem = ["ID Artigo", "Título", "Decisão", "Motivo Exclusão", "Sugestão IA", "Confiança IA", "Revisor"]
+    ws_triagem.append(headers_triagem)
+    for cell in ws_triagem[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    triagens = db.query(models.Triagem).join(models.Artigo).filter(models.Artigo.projeto_id == projeto_id).all()
+    for t in triagens:
+        ws_triagem.append([t.artigo_id, t.artigo.titulo, t.decisao, t.motivo_exclusao, t.avaliacao_ia, f"{t.confianca_ia}%" if t.confianca_ia else "-", t.revisor])
+
+    ws_extracao = wb.create_sheet(title="Extração")
+    headers_extracao = ["ID Artigo", "Título Artigo", "Código RQ", "Pergunta", "Resposta Encontrada", "Evidência / Trecho"]
+    ws_extracao.append(headers_extracao)
+    for cell in ws_extracao[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    extracoes = db.query(models.Extracao).join(models.Artigo).filter(models.Artigo.projeto_id == projeto_id).all()
+    for e in extracoes:
+        ws_extracao.append([e.artigo_id, e.artigo.titulo, e.questao.codigo, e.questao.pergunta, e.resposta, e.evidencia])
+
+    for ws in wb.worksheets:
+        ws.views.sheetView[0].showGridLines = True
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.row > 1 and cell.fill != header_fill:
+                    cell.font = data_font
+                cell.border = thin_border
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+
+    wb.save(caminho_saida)
+    return caminho_saida
+
+======================================================================
+ARQUIVO: app/services/ollama_service.py
+======================================================================
+import json
+import requests
+from pypdf import PdfReader
+
+
+def extrair_texto_pdf(caminho_pdf: str) -> str:
+    reader = PdfReader(caminho_pdf)
+    texto = ""
+    for page in reader.pages:
+        conteudo = page.extract_text()
+        if conteudo:
+            texto += conteudo + "\n"
+    return texto[:8000]
+
+
+def analisar_artigo_com_ollama(texto_artigo: str, criterios_inclusao: list, criterios_exclusao: list, modelo: str = "llama3") -> dict:
+    url = "http://localhost:11434/api/generate"
+
+    prompt = f"""
+    Você é um especialista em Revisão Sistemática da Literatura (RSL).
+    Analise o texto do artigo abaixo com base nos critérios de inclusão e exclusão informados.
+
+    CRITÉRIOS DE INCLUSÃO:
+    {json.dumps(criterios_inclusao, ensure_ascii=False)}
+
+    CRITÉRIOS DE EXCLUSÃO:
+    {json.dumps(criterios_exclusao, ensure_ascii=False)}
+
+    TEXTO DO ARTIGO:
+    {texto_artigo}
+
+    Responda EXATAMENTE no seguinte formato JSON:
+    {{
+        "recomendacao": "INCLUIR" ou "EXCLUIR",
+        "confianca": 85,
+        "justificativa": "Sua explicação detalhada aqui com base nos critérios."
+    }}
+    """
+
+    payload = {"model": modelo, "prompt": prompt, "stream": False, "format": "json"}
+
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        if response.status_code == 200:
+            resultado_str = response.json().get("response", "{}")
+            return json.loads(resultado_str)
+    except Exception as e:
+        return {"recomendacao": "DUVIDA", "confianca": 0, "justificativa": f"Erro na conexão com Ollama: {str(e)}"}
+
+
+def extrair_resposta_rq(texto_artigo: str, pergunta_rq: str, modelo: str = "llama3") -> dict:
+    url = "http://localhost:11434/api/generate"
+
+    prompt = f"""
+    Com base no texto do artigo científico abaixo, responda à Questão de Pesquisa (RQ) e extraia a evidência textual direta.
+
+    QUESTÃO DE PESQUISA:
+    {pergunta_rq}
+
+    TEXTO DO ARTIGO:
+    {texto_artigo}
+
+    Responda EXATAMENTE no seguinte formato JSON:
+    {{
+        "resposta": "Sua resposta direta aqui",
+        "evidencia": "Trecho/Citação exata extraída do texto do artigo"
+    }}
+    """
+
+    payload = {"model": modelo, "prompt": prompt, "stream": False, "format": "json"}
+
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        if response.status_code == 200:
+            return json.loads(response.json().get("response", "{}"))
+    except Exception as e:
+        return {"resposta": "Erro ao processar", "evidencia": str(e)}
+
+======================================================================
+ARQUIVO: test/test_main.py
+======================================================================
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_home_endpoint():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "message" in response.json()
+
+
+def test_listar_projetos():
+    response = client.get("/projetos/")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+======================================================================
+ARQUIVO: app/templates/base.html
+======================================================================
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Assistente RSL{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans text-gray-900">
+    <nav class="bg-slate-800 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">Assistente RSL</h1>
+            <div class="space-x-4">
+                <a href="/dashboard" class="hover:text-blue-300">Dashboard</a>
+                <a href="/protocolo" class="hover:text-blue-300">Protocolo</a>
+                <a href="/artigos" class="hover:text-blue-300">Artigos</a>
+                <a href="/triagem" class="hover:text-blue-300">Triagem</a>
+            </div>
+        </div>
+    </nav>
+    <main class="container mx-auto p-6">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
+
+======================================================================
+ARQUIVO: app/templates/dashboard.html
+======================================================================
+{% extends "base.html" %}
+{% block title %}Dashboard - PRISMA{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Visão Geral do Projeto (PRISMA 2020)</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+        <p class="text-sm text-gray-500">Total Encontrados</p>
+        <p class="text-2xl font-bold">{{ prisma.total_encontrados }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
+        <p class="text-sm text-gray-500">Duplicados Removidos</p>
+        <p class="text-2xl font-bold">{{ prisma.duplicados }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+        <p class="text-sm text-gray-500">Estudos Incluídos</p>
+        <p class="text-2xl font-bold">{{ prisma.estudos_incluidos }}</p>
+    </div>
+</div>
+
+<div class="bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-2">Exportar Dados</h3>
+    <p class="text-gray-600 mb-4">Baixe a planilha consolidada em Excel contendo todas as abas (Artigos, Triagem, Extração e PRISMA).</p>
+    <a href="/exportacao/excel/1" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded inline-block">
+        Baixar Relatório RSL_Projeto.xlsx
+    </a>
+</div>
+{% endblock %}
+
+======================================================================
+VERSÃO ATUALIZADA - ALTERAÇÕES POSTERIORES
+======================================================================
+
+As seções abaixo substituem as versões anteriores dos arquivos indicados.
+Elas incluem o cadastro manual pelo frontend, o botão superior, o fluxo
+de primeiro projeto e a API atualizada.
+
+======================================================================
+ARQUIVO ATUALIZADO: app/main.py
+======================================================================
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
+
+from app.database import models
+from app.database.database import engine, get_db
+from app.routes import artigos, exportacao, ia, projetos, protocolo
+from app.services.prisma import calcular_fluxo_prisma
+
+models.Base.metadata.create_all(bind=engine)
+if "etapa" not in {column["name"] for column in inspect(engine).get_columns("triagens")}:
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE triagens ADD COLUMN etapa VARCHAR(20) DEFAULT 'TITULO_RESUMO' NOT NULL"))
+
+app = FastAPI(title="Assistente RSL", version="0.1.0")
+templates = Jinja2Templates(directory="app/templates")
+
+app.include_router(projetos.router)
+app.include_router(protocolo.router)
+app.include_router(artigos.router)
+app.include_router(exportacao.router)
+app.include_router(ia.router)
+
+@app.get("/", include_in_schema=False)
+def home():
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+def obter_projeto(db: Session, projeto_id: int):
+    projeto = db.query(models.Projeto).filter(models.Projeto.id == projeto_id).first()
+    if not projeto:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    return projeto
+
+@app.get("/dashboard")
+def dashboard_padrao(request: Request, db: Session = Depends(get_db)):
+    projeto = db.query(models.Projeto).order_by(models.Projeto.id).first()
+    if projeto:
+        return RedirectResponse(url=f"/dashboard/{projeto.id}", status_code=307)
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"prisma": calcular_fluxo_prisma(db, 0), "projeto": None})
+
+@app.get("/dashboard/{projeto_id}")
+def view_dashboard(projeto_id: int, request: Request, db: Session = Depends(get_db)):
+    projeto = obter_projeto(db, projeto_id)
+    prisma_data = calcular_fluxo_prisma(db, projeto.id)
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"prisma": prisma_data, "projeto": projeto})
+
+@app.get("/protocolo")
+def protocolo_padrao(request: Request, db: Session = Depends(get_db)):
+    projeto = db.query(models.Projeto).order_by(models.Projeto.id).first()
+    if projeto:
+        return RedirectResponse(url=f"/protocolo/{projeto.id}", status_code=307)
+    raise HTTPException(status_code=404, detail="Nenhum projeto cadastrado")
+
+@app.get("/protocolo/{projeto_id}")
+def view_protocolo(projeto_id: int, request: Request, db: Session = Depends(get_db)):
+    projeto = obter_projeto(db, projeto_id)
+    return templates.TemplateResponse(request=request, name="protocolo.html", context={"protocolo": projeto.protocolo, "projeto": projeto})
+
+@app.get("/artigos")
+def artigos_padrao(request: Request, db: Session = Depends(get_db)):
+    projeto = db.query(models.Projeto).order_by(models.Projeto.id).first()
+    if projeto:
+        return RedirectResponse(url=f"/artigos/{projeto.id}", status_code=307)
+    return templates.TemplateResponse(request=request, name="artigos.html", context={"artigos": [], "projeto": None})
+
+@app.get("/artigos/{projeto_id}")
+def view_artigos(projeto_id: int, request: Request, db: Session = Depends(get_db)):
+    projeto = obter_projeto(db, projeto_id)
+    return templates.TemplateResponse(request=request, name="artigos.html", context={"artigos": projeto.artigos, "projeto": projeto})
+
+@app.get("/triagem")
+def triagem_padrao(request: Request, db: Session = Depends(get_db)):
+    artigo = db.query(models.Artigo).filter(models.Artigo.status.in_([models.StatusArtigo.IMPORTADO, models.StatusArtigo.TRIAGEM])).first()
+    if artigo:
+        return RedirectResponse(url=f"/triagem/{artigo.projeto_id}", status_code=307)
+    raise HTTPException(status_code=404, detail="Nenhum artigo pendente para triagem")
+
+@app.get("/triagem/{projeto_id}")
+def view_triagem(projeto_id: int, request: Request, db: Session = Depends(get_db)):
+    projeto = obter_projeto(db, projeto_id)
+    artigo_pendente = db.query(models.Artigo).filter(models.Artigo.projeto_id == projeto_id, models.Artigo.status.in_([models.StatusArtigo.IMPORTADO, models.StatusArtigo.TRIAGEM])).first()
+    return templates.TemplateResponse(request=request, name="triagem.html", context={"artigo": artigo_pendente, "projeto": projeto})
+
+======================================================================
+ARQUIVO ATUALIZADO: app/routes/artigos.py
+======================================================================
+from app.database import models
+from app.database.database import get_db
+from app.services.deduplicacao import encontrar_duplicados
+from app.services.artigos import importar_artigos_bibtex, importar_artigos_csv
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/api/artigos", tags=["Artigos"])
+
+class ArtigoCreate(BaseModel):
+    projeto_id: int
+    titulo: str
+    autores: str | None = None
+    ano: int | None = None
+    resumo: str | None = None
+    palavras_chave: str | None = None
+    doi: str | None = None
+    url: str | None = None
+    fonte: str | None = "Cadastro manual"
+
+class TriagemCreate(BaseModel):
+    artigo_id: int
+    decisao: models.DecisaoTriagem
+    etapa: models.EtapaTriagem = models.EtapaTriagem.TITULO_RESUMO
+    motivo_exclusao: str | None = None
+    revisor: str = "Humano"
+
+@router.get("/projeto/{projeto_id}")
+def listar_artigos_projeto(projeto_id: int, status: str | None = None, db: Session = Depends(get_db)):
+    query = db.query(models.Artigo).filter(models.Artigo.projeto_id == projeto_id)
+    if status:
+        query = query.filter(models.Artigo.status == status)
+    return query.all()
+
+@router.post("/")
+def criar_artigo(dados: ArtigoCreate, db: Session = Depends(get_db)):
+    projeto = db.query(models.Projeto).filter(models.Projeto.id == dados.projeto_id).first()
+    if not projeto:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    artigo = models.Artigo(**dados.model_dump())
+    db.add(artigo)
+    db.commit()
+    db.refresh(artigo)
+    return artigo
+
+@router.post("/triagem")
+def registrar_triagem(dados: TriagemCreate, db: Session = Depends(get_db)):
+    artigo = db.query(models.Artigo).filter(models.Artigo.id == dados.artigo_id).first()
+    if not artigo:
+        raise HTTPException(status_code=404, detail="Artigo não encontrado")
+    nova_triagem = models.Triagem(**dados.model_dump())
+    if dados.etapa == models.EtapaTriagem.TITULO_RESUMO:
+        if dados.decisao == models.DecisaoTriagem.INCLUIR:
+            artigo.status = models.StatusArtigo.LEITURA_COMPLETA
+        elif dados.decisao == models.DecisaoTriagem.EXCLUIR:
+            artigo.status = models.StatusArtigo.EXCLUIDO_TRIAGEM
+    elif dados.etapa == models.EtapaTriagem.TEXTO_COMPLETO:
+        if dados.decisao == models.DecisaoTriagem.INCLUIR:
+            artigo.status = models.StatusArtigo.INCLUIDO
+        elif dados.decisao == models.DecisaoTriagem.EXCLUIR:
+            artigo.status = models.StatusArtigo.EXCLUIDO_TEXTO_COMPLETO
+    db.add(nova_triagem)
+    db.commit()
+    return {"message": "Triagem registrada com sucesso", "status_artigo": artigo.status}
+
+@router.post("/deduplicar/{projeto_id}")
+def executar_deduplicacao(projeto_id: int, db: Session = Depends(get_db)):
+    artigos = db.query(models.Artigo).filter(models.Artigo.projeto_id == projeto_id).all()
+    duplicados_ids = encontrar_duplicados(artigos)
+    if duplicados_ids:
+        db.query(models.Artigo).filter(models.Artigo.id.in_(duplicados_ids)).update({models.Artigo.status: models.StatusArtigo.DUPLICADO}, synchronize_session=False)
+        db.commit()
+    return {"total_analisados": len(artigos), "duplicados_encontrados": len(duplicados_ids)}
+
+@router.post("/importar/{projeto_id}")
+async def importar_artigos(projeto_id: int, arquivo: UploadFile = File(...), db: Session = Depends(get_db)):
+    conteudo = await arquivo.read()
+    nome = (arquivo.filename or "").lower()
+    if nome.endswith(".csv"):
+        total = importar_artigos_csv(db, projeto_id, conteudo, arquivo.filename or "CSV")
+    elif nome.endswith((".bib", ".bibtex")):
+        total = importar_artigos_bibtex(db, projeto_id, conteudo.decode("utf-8", errors="ignore"), arquivo.filename or "BibTeX")
+    else:
+        raise HTTPException(status_code=400, detail="Envie um arquivo CSV ou BibTeX")
+    return {"message": "Artigos importados com sucesso", "total_importado": total}
+
+======================================================================
+ARQUIVO ATUALIZADO: app/templates/base.html
+======================================================================
+<nav class="bg-slate-800 text-white p-4 shadow-md">
+    <div class="container mx-auto flex justify-between items-center">
+        <h1 class="text-xl font-bold">Assistente RSL</h1>
+        <div class="space-x-4">
+            <a href="/dashboard/{{ projeto.id if projeto else '' }}">Dashboard</a>
+            <a href="/protocolo/{{ projeto.id if projeto else '' }}">Protocolo</a>
+            <a href="{{ '/artigos/' ~ projeto.id if projeto else '/artigos' }}">Artigos</a>
+            <a href="/triagem/{{ projeto.id if projeto else '' }}">Triagem</a>
+            <a href="{{ '/artigos/' ~ projeto.id ~ '#adicionar-artigo' if projeto else '/artigos' }}" class="bg-blue-600 px-3 py-2 rounded font-semibold">+ Adicionar artigo</a>
+        </div>
+    </div>
+</nav>
+
+======================================================================
+ARQUIVO ATUALIZADO: app/templates/artigos.html
+======================================================================
+{% if not projeto %}
+<div class="bg-white p-6 rounded-lg shadow mb-6">
+    <h3>Crie um projeto para começar</h3>
+    <p>Os artigos precisam pertencer a um projeto de revisão.</p>
+    <form id="form-projeto">
+        <input name="nome" required placeholder="Nome do projeto *">
+        <textarea name="descricao" placeholder="Descrição do projeto"></textarea>
+        <button type="submit">Criar projeto e adicionar artigo</button>
+    </form>
+</div>
+{% else %}
+<button id="mostrar-formulario" type="button">+ Adicionar artigo</button>
+<div id="painel-artigo" class="hidden">
+    <span id="adicionar-artigo"></span>
+    <form id="form-artigo">
+        <input name="titulo" required placeholder="Título *">
+        <input name="autores" placeholder="Autores">
+        <input name="ano" type="number" placeholder="Ano">
+        <input name="doi" placeholder="DOI">
+        <input name="url" type="url" placeholder="URL">
+        <input name="fonte" placeholder="Fonte">
+        <input name="palavras_chave" placeholder="Palavras-chave">
+        <textarea name="resumo" placeholder="Resumo"></textarea>
+        <button type="submit">Salvar artigo</button>
+    </form>
+</div>
+{% endif %}
+
+<script>
+    const painel = document.getElementById("painel-artigo");
+    if (painel) {
+        document.getElementById("mostrar-formulario").addEventListener("click", () => painel.classList.toggle("hidden"));
+        if (window.location.hash === "#adicionar-artigo") painel.classList.remove("hidden");
+        document.getElementById("form-artigo").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const dados = Object.fromEntries(new FormData(event.currentTarget).entries());
+            dados.projeto_id = {{ projeto.id }};
+            dados.ano = dados.ano ? Number(dados.ano) : null;
+            const resposta = await fetch("/api/artigos/", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(dados)});
+            if (resposta.ok) window.location.reload();
+        });
+    }
+    const formProjeto = document.getElementById("form-projeto");
+    if (formProjeto) formProjeto.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const resposta = await fetch("/projetos/", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(Object.fromEntries(new FormData(formProjeto).entries()))});
+        if (resposta.ok) window.location.href = `/artigos/${(await resposta.json()).id}#adicionar-artigo`;
+    });
+</script>
+
+======================================================================
+ARQUIVO: app/templates/artigos.html
+======================================================================
+{% extends "base.html" %}
+{% block title %}Lista de Artigos{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Artigos do Projeto</h2>
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Título</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Autores</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ano</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for artigo in artigos %}
+            <tr>
+                <td class="px-6 py-4 text-sm font-medium text-gray-900">{{ artigo.titulo }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">{{ artigo.autores }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">{{ artigo.ano }}</td>
+                <td class="px-6 py-4 text-sm text-gray-500">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                        {{ artigo.status }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+======================================================================
+ARQUIVO: app/templates/protocolo.html
+======================================================================
+{% extends "base.html" %}
+{% block title %}Protocolo PICO / PICOC{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Protocolo de Pesquisa (PICO)</h2>
+<div class="bg-white p-6 rounded-lg shadow space-y-4">
+    <div>
+        <label class="font-bold text-gray-700">População / Contexto:</label>
+        <p class="text-gray-600">{{ protocolo.populacao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Intervenção:</label>
+        <p class="text-gray-600">{{ protocolo.intervencao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Comparação:</label>
+        <p class="text-gray-600">{{ protocolo.comparacao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Outcome (Resultados):</label>
+        <p class="text-gray-600">{{ protocolo.outcome or "Não informado" }}</p>
+    </div>
+</div>
+{% endblock %}
+
+======================================================================
+ARQUIVO: app/templates/triagem.html
+======================================================================
+{% extends "base.html" %}
+{% block title %}Triagem de Artigos{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Painel de Triagem</h2>
+
+{% if artigo %}
+<div class="bg-white p-6 rounded-lg shadow space-y-4">
+    <h3 class="text-xl font-bold text-gray-800">{{ artigo.titulo }}</h3>
+    <p class="text-sm text-gray-500"><strong>Autores:</strong> {{ artigo.autores }} ({{ artigo.ano }})</p>
+    <div class="p-4 bg-gray-50 rounded text-gray-700">
+        <strong>Resumo:</strong>
+        <p class="mt-1 text-sm">{{ artigo.resumo or "Sem resumo disponível." }}</p>
+    </div>
+
+    <form action="/artigos/triagem" method="POST" class="flex gap-4 pt-4 border-t">
+        <input type="hidden" name="artigo_id" value="{{ artigo.id }}">
+        <button type="submit" name="decisao" value="INCLUIR" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded">
+            Incluir
+        </button>
+        <button type="submit" name="decisao" value="EXCLUIR" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded">
+            Excluir
+        </button>
+    </form>
+</div>
+{% else %}
+<div class="bg-white p-6 rounded-lg shadow text-center text-gray-500">
+    Nenhum artigo pendente para triagem no momento!
+</div>
+{% endif %}
+{% endblock %}

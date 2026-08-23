@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Triagem de Artigos{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Painel de Triagem</h2>
+
+{% if artigo %}
+<div class="bg-white p-6 rounded-lg shadow space-y-4">
+    <h3 class="text-xl font-bold text-gray-800">{{ artigo.titulo }}</h3>
+    <p class="text-sm text-gray-500"><strong>Autores:</strong> {{ artigo.autores }} ({{ artigo.ano }})</p>
+    <div class="p-4 bg-gray-50 rounded text-gray-700">
+        <strong>Resumo:</strong>
+        <p class="mt-1 text-sm">{{ artigo.resumo or "Sem resumo disponível." }}</p>
+    </div>
+
+    <div id="mensagem" class="hidden rounded p-3"></div>
+    <form id="form-triagem" class="flex gap-4 pt-4 border-t">
+        <input type="hidden" name="artigo_id" value="{{ artigo.id }}">
+        <button type="submit" name="decisao" value="INCLUIR" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded">
+            Incluir
+        </button>
+        <button type="submit" name="decisao" value="EXCLUIR" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded">
+            Excluir
+        </button>
+    </form>
+    <script>
+        document.getElementById("form-triagem").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const decisao = event.submitter.value;
+            const resposta = await fetch("/api/artigos/triagem", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({artigo_id: Number(form.artigo_id.value), decisao, etapa: "TITULO_RESUMO"})
+            });
+            const mensagem = document.getElementById("mensagem");
+            mensagem.classList.remove("hidden");
+            if (resposta.ok) {
+                mensagem.textContent = "Triagem registrada com sucesso.";
+                mensagem.classList.add("bg-green-100", "text-green-800");
+                form.remove();
+            } else {
+                mensagem.textContent = "Não foi possível registrar a triagem.";
+                mensagem.classList.add("bg-red-100", "text-red-800");
+            }
+        });
+    </script>
+</div>
+{% else %}
+<div class="bg-white p-6 rounded-lg shadow text-center text-gray-500">
+    Nenhum artigo pendente para triagem no momento! 🎉
+</div>
+{% endif %}
+{% endblock %}

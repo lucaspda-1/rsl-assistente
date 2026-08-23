@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Protocolo PICO / PICOC{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Protocolo de Pesquisa (PICO)</h2>
+<div class="bg-white p-6 rounded-lg shadow space-y-4">
+    <div>
+        <label class="font-bold text-gray-700">População / Contexto:</label>
+        <p class="text-gray-600">{{ protocolo.populacao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Intervenção:</label>
+        <p class="text-gray-600">{{ protocolo.intervencao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Comparação:</label>
+        <p class="text-gray-600">{{ protocolo.comparacao or "Não informado" }}</p>
+    </div>
+    <div>
+        <label class="font-bold text-gray-700">Outcome (Resultados):</label>
+        <p class="text-gray-600">{{ protocolo.outcome or "Não informado" }}</p>
+    </div>
+</div>
+{% endblock %}

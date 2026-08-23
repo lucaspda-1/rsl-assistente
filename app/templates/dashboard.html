@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - PRISMA{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold mb-4">Visão Geral do Projeto (PRISMA 2020)</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+        <p class="text-sm text-gray-500">Total Encontrados</p>
+        <p class="text-2xl font-bold">{{ prisma.total_encontrados }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-yellow-500">
+        <p class="text-sm text-gray-500">Duplicados Removidos</p>
+        <p class="text-2xl font-bold">{{ prisma.duplicados }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+        <p class="text-sm text-gray-500">Estudos Incluídos</p>
+        <p class="text-2xl font-bold">{{ prisma.estudos_incluidos }}</p>
+    </div>
+</div>
+
+<div class="bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-2">Exportar Dados</h3>
+    <p class="text-gray-600 mb-4">Baixe a planilha consolidada em Excel contendo todas as abas (Artigos, Triagem, Extração e PRISMA).</p>
+    <a href="/exportacao/excel/{{ projeto.id if projeto else 0 }}" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded inline-block">
+        📥 Baixar Relatório RSL_Projeto.xlsx
+    </a>
+</div>
+{% endblock %}
